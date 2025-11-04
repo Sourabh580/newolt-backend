@@ -9,28 +9,37 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// PostgreSQL Connection (from environment variables)
+// ✅ PostgreSQL Connection (with SSL for Render)
 const pool = new Pool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT,
+  ssl: { rejectUnauthorized: false }, // 👈 important for Render hosted DB
 });
 
-// ✅ Create table if it doesn’t exist
-await pool.query(`
-  CREATE TABLE IF NOT EXISTS orders (
-    id SERIAL PRIMARY KEY,
-    restaurant_id TEXT,
-    customer_name TEXT,
-    table_no TEXT,
-    dish TEXT,
-    price INT,
-    status TEXT DEFAULT 'pending',
-    placed_at TIMESTAMP DEFAULT NOW()
-  );
-`);
+// ✅ Initialize table (wrapped in async function)
+async function initDB() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id SERIAL PRIMARY KEY,
+        restaurant_id TEXT,
+        customer_name TEXT,
+        table_no TEXT,
+        dish TEXT,
+        price INT,
+        status TEXT DEFAULT 'pending',
+        placed_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log("✅ Table 'orders' is ready");
+  } catch (err) {
+    console.error("❌ Error creating table:", err);
+  }
+}
+initDB();
 
 // 🟢 POST - Place new order
 app.post("/api/order", async (req, res) => {
@@ -57,7 +66,8 @@ app.post("/api/order", async (req, res) => {
 app.get("/api/orders", async (req, res) => {
   try {
     const { restaurant_id } = req.query;
-    if (!restaurant_id) return res.status(400).json({ error: "Missing restaurant_id" });
+    if (!restaurant_id)
+      return res.status(400).json({ error: "Missing restaurant_id" });
 
     const result = await pool.query(
       "SELECT * FROM orders WHERE restaurant_id = $1 ORDER BY placed_at DESC",
@@ -85,8 +95,9 @@ app.patch("/api/orders/:id", async (req, res) => {
   }
 });
 
+// 🏠 Default route
 app.get("/", (req, res) => {
-  res.send("✅ Newolt backend is running fine!");
+  res.send("✅ Newolt backend is running fine and connected to Render DB with SSL!");
 });
 
 app.listen(process.env.PORT || 10000, () => {
