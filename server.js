@@ -1,124 +1,118 @@
 import express from "express";
+import cors from "cors";
 import pkg from "pg";
 const { Pool } = pkg;
-import cors from "cors";
-import dotenv from "dotenv";
-dotenv.config();
 
 const app = express();
-app.use(express.json());
-app.use(cors());
+const port = process.env.PORT || 10000;
 
-// ✅ PostgreSQL Connection (Render compatible)
+// 🧩 Database setup
 const pool = new Pool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT,
+  connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
 
-// ✅ Ensure table schema (with notes + items)
-async function initDB() {
+// 🧰 Middleware
+app.use(cors());
+app.use(express.json());
+
+// ✅ Ensure orders table exists
+const createTable = async () => {
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS orders (
         id SERIAL PRIMARY KEY,
-        restaurant_id TEXT NOT NULL,
-        customer_name TEXT NOT NULL,
+        restaurant_id TEXT DEFAULT 'res-1',
         table_no TEXT,
-        notes TEXT DEFAULT '',
-        items JSON DEFAULT '[]',
-        price INT DEFAULT 0,
+        customer_name TEXT,
+        notes TEXT,
+        items JSONB,
+        total NUMERIC,
         status TEXT DEFAULT 'pending',
-        placed_at TIMESTAMP DEFAULT NOW()
+        time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    console.log("✅ Table 'orders' is ready");
+    console.log("✅ Table 'orders' ready");
   } catch (err) {
-    console.error("❌ Error creating table:", err);
+    console.error("❌ Table creation error:", err);
   }
-}
-initDB();
+};
+createTable();
 
-// 🟢 POST - Place new order
+// 🟢 Create new order
 app.post("/api/orders", async (req, res) => {
   try {
-    const { restaurant_id, customer_name, table_no, notes, items, price } = req.body;
-    if (!restaurant_id || !customer_name || !items) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    const itemsJSON = typeof items === "string" ? JSON.parse(items) : items;
+    const { restaurant_id = "res-1", table_no, customer_name, notes, items, total, status } = req.body;
 
     const result = await pool.query(
-      `INSERT INTO orders (restaurant_id, customer_name, table_no, notes, items, price)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [restaurant_id, customer_name, table_no, notes || "", JSON.stringify(itemsJSON), price || 0]
+      `INSERT INTO orders (restaurant_id, table_no, customer_name, notes, items, total, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *;`,
+      [restaurant_id, table_no, customer_name, notes || "", JSON.stringify(items || []), total, status || "pending"]
     );
 
+    console.log("✅ New order placed:", result.rows[0]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error("❌ Order insert error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// 🟡 GET - Fetch all orders for a restaurant (cleaned)
+// 🟣 Get all orders
 app.get("/api/orders", async (req, res) => {
   try {
-    const { restaurant_id } = req.query;
-    if (!restaurant_id)
-      return res.status(400).json({ error: "Missing restaurant_id" });
-
+    const restaurant_id = req.query.restaurant_id || "res-1";
     const result = await pool.query(
-      "SELECT * FROM orders WHERE restaurant_id = $1 ORDER BY placed_at DESC",
+      `SELECT * FROM orders WHERE restaurant_id = $1 ORDER BY time DESC`,
       [restaurant_id]
     );
 
-    // 🧹 Clean up undefined or null items before sending
-    const cleaned = result.rows.map((row) => ({
+    // 🧩 Sanitize output so dashboard never crashes
+    const safeRows = result.rows.map((row) => ({
       ...row,
-      items:
-        typeof row.items === "string"
-          ? JSON.parse(row.items || "[]")
-          : Array.isArray(row.items)
-          ? row.items
-          : [],
+      items: Array.isArray(row.items)
+        ? row.items
+        : typeof row.items === "string"
+        ? JSON.parse(row.items)
+        : [],
     }));
 
-    res.json(cleaned);
+    res.json(safeRows);
   } catch (err) {
-    console.error("❌ Fetch error:", err);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Fetch orders error:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// 🔵 PATCH - Update order status
+// 🟠 Update order status
 app.patch("/api/orders/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    if (!status) return res.status(400).json({ error: "Missing status" });
 
     const result = await pool.query(
-      "UPDATE orders SET status = $1 WHERE id = $2 RETURNING *",
+      `UPDATE orders SET status = $1 WHERE id = $2 RETURNING *;`,
       [status, id]
     );
 
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: "Order not found" });
+
+    console.log("✅ Order updated:", result.rows[0]);
     res.json(result.rows[0]);
   } catch (err) {
-    console.error("❌ Update error:", err);
-    res.status(500).json({ error: err.message });
+    console.error("❌ Update order error:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// 🏠 Default route
+// 🧪 Health check
 app.get("/", (req, res) => {
-  res.send("✅ Nevolt backend is running fine and connected to Render DB with SSL!");
+  res.send("✅ Nevolt Backend is running");
 });
 
-app.listen(process.env.PORT || 10000, () => {
-  console.log(`🚀 Server running on port ${process.env.PORT || 10000}`);
+// 🚀 Start server
+app.listen(port, () => {
+  console.log(`🚀 Server running on port ${port}`);
 });
