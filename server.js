@@ -1,127 +1,110 @@
 import express from "express";
-import cors from "cors";
 import pkg from "pg";
-
 const { Pool } = pkg;
-const app = express();
+import cors from "cors";
+import dotenv from "dotenv";
+dotenv.config();
 
-// ✅ Middleware setup
+const app = express();
+app.use(express.json());
 app.use(
   cors({
-    origin: ["https://dine-2.onrender.com", "https://owner-dashboard-2z3z.onrender.com"],
-    methods: ["GET", "POST", "PATCH"],
-    allowedHeaders: ["Content-Type"],
+    origin: [
+      "https://dine-2.onrender.com",
+      "https://owner-dashboard-2z3z.onrender.com",
+    ],
   })
 );
-app.use(express.json());
 
-// ✅ PostgreSQL connection
+// 🟢 PostgreSQL Connection
 const pool = new Pool({
-  connectionString:
-    "postgresql://restaurant_backend_tahc_user:7ZNAWJG49Rq2pitu5FIAVp9BOQenNbdz@dpg-d449tu9r0fns7382dqp0-a/restaurant_backend_tahc",
+  connectionString: process.env.DATABASE_URL || "postgresql://restaurant_backend_tahc_user:7ZNAWJG49Rq2pitu5FIAVp9BOQenNbdz@dpg-d449tu9r0fns7382dqp0-a/restaurant_backend_tahc",
   ssl: { rejectUnauthorized: false },
 });
 
-// ✅ Create table if not exists
+// 🧱 Ensure table exists
 async function initDB() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS orders (
-      id SERIAL PRIMARY KEY,
-      restaurant_id TEXT,
-      table_no TEXT,
-      customer_name TEXT,
-      items JSONB,
-      total_amount NUMERIC,
-      status TEXT DEFAULT 'pending',
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-  `);
-  console.log("✅ Orders table ready");
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id SERIAL PRIMARY KEY,
+        restaurant_id TEXT,
+        customer_name TEXT,
+        table_no TEXT,
+        items JSONB,
+        total_price INT,
+        status TEXT DEFAULT 'pending',
+        placed_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log("✅ Orders table ready");
+  } catch (err) {
+    console.error("❌ Error creating table:", err);
+  }
 }
 initDB();
 
-// 🟢 Create Order (Menu se)
-app.post("/api/orders", async (req, res) => {
+// 🟩 POST: Place new order
+app.post("/api/order", async (req, res) => {
   try {
     console.log("📥 Order request body:", req.body);
-    const { restaurant_id, table_no, customer_name, items, total_amount } = req.body;
 
-    // Validate input
-    if (!restaurant_id || !items || !Array.isArray(items)) {
-      console.error("❌ Invalid order payload:", req.body);
-      return res.status(400).json({ error: "Invalid order format or missing fields" });
+    const { restaurant_id, customer_name, table_no, items, total_price } = req.body;
+
+    if (!restaurant_id || !items) {
+      return res.status(400).json({ error: "Missing restaurant_id or items" });
     }
 
     const result = await pool.query(
-      `INSERT INTO orders (restaurant_id, table_no, customer_name, items, total_amount)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING *`,
-      [
-        restaurant_id,
-        table_no || null,
-        customer_name || "Guest",
-        JSON.stringify(items),
-        total_amount || 0,
-      ]
+      `INSERT INTO orders (restaurant_id, customer_name, table_no, items, total_price)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [restaurant_id, customer_name || "Guest", table_no || "-", items, total_price || 0]
     );
 
     console.log("✅ Order saved successfully:", result.rows[0]);
-    res.status(201).json({ success: true, order: result.rows[0] });
-  } catch (error) {
-    console.error("❌ Error while creating order:", error);
-    res.status(500).json({ error: "Server error while creating order" });
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error("❌ Error while creating order:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// 🟢 Get Orders (Dashboard se)
+// 🟨 GET: Fetch all orders
 app.get("/api/orders", async (req, res) => {
   try {
     const { restaurant_id } = req.query;
-    if (!restaurant_id) {
+    if (!restaurant_id)
       return res.status(400).json({ error: "Missing restaurant_id" });
-    }
 
     const result = await pool.query(
-      `SELECT * FROM orders WHERE restaurant_id = $1 ORDER BY created_at DESC`,
+      "SELECT * FROM orders WHERE restaurant_id = $1 ORDER BY placed_at DESC",
       [restaurant_id]
     );
-
-    console.log(`🧾 Fetched ${result.rows.length} orders for ${restaurant_id}`);
+    console.log(`📤 Sending ${result.rows.length} orders`);
     res.json(result.rows);
-  } catch (error) {
-    console.error("❌ Error fetching orders:", error);
-    res.status(500).json({ error: "Server error while fetching orders" });
+  } catch (err) {
+    console.error("❌ Fetch error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// 🟡 Update Order (Mark completed)
+// 🟦 PATCH: Update order status
 app.patch("/api/orders/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-
-    const result = await pool.query(
-      `UPDATE orders SET status = $1 WHERE id = $2 RETURNING *`,
-      [status || "completed", id]
-    );
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: "Order not found" });
-    }
-
-    console.log("✅ Order updated:", result.rows[0]);
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error("❌ Error updating order:", error);
-    res.status(500).json({ error: "Server error while updating order" });
+    await pool.query("UPDATE orders SET status = $1 WHERE id = $2", [status, id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Update error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ✅ Root route
 app.get("/", (req, res) => {
-  res.send("🚀 Nevolt Backend running successfully");
+  res.send("✅ Nevolt backend connected and working fine!");
 });
 
-// ✅ Start Server
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(process.env.PORT || 10000, () => {
+  console.log(`🚀 Server running on port ${process.env.PORT || 10000}`);
+});
