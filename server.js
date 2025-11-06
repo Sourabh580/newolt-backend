@@ -3,6 +3,7 @@ import cors from "cors";
 import pkg from "pg";
 
 const { Pool } = pkg;
+
 const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
@@ -24,39 +25,37 @@ async function ensureTables() {
       table_no TEXT,
       items JSONB,
       notes TEXT,
-      total_price NUMERIC,
+      total NUMERIC,
       status TEXT DEFAULT 'pending',
       placed_at TIMESTAMP DEFAULT NOW()
     );
   `);
-  console.log("✅ Orders table ready");
+  console.log("✅ Orders table is ready");
 }
 
-// 🟢 Create new order
-app.post("/api/orders", async (req, res) => {
-  try {
-    const { restaurant_id, customer_name, table_no, items, notes, total } = req.body;
+// 🟩 Route alias: Allow /api/orders to call /api/order
+app.post("/api/orders", (req, res) => {
+  req.url = "/api/order";
+  app._router.handle(req, res);
+});
 
-    // total may come as "total" from menu, convert to numeric
-    const total_price = parseFloat(total) || 0;
+// 🟢 Create new order
+app.post("/api/order", async (req, res) => {
+  try {
+    const { restaurant_id, customer_name, table_no, items, notes, total } =
+      req.body;
 
     const result = await pool.query(
-      `INSERT INTO orders (restaurant_id, customer_name, table_no, items, notes, total_price, status)
+      `INSERT INTO orders (restaurant_id, customer_name, table_no, items, notes, total, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'pending')
        RETURNING *`,
-      [restaurant_id, customer_name, table_no, JSON.stringify(items), notes || "", total_price]
+      [restaurant_id, customer_name, table_no, JSON.stringify(items), notes || "", total]
     );
 
-    console.log("✅ New order created:", {
-      id: result.rows[0].id,
-      customer_name,
-      table_no,
-      total_price,
-    });
-
+    console.log("✅ New order inserted:", result.rows[0]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    console.error("❌ Error creating order:", err.message);
+    console.error("❌ Error creating order:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -65,44 +64,36 @@ app.post("/api/orders", async (req, res) => {
 app.get("/api/orders", async (req, res) => {
   try {
     const { restaurant_id } = req.query;
-
     const result = await pool.query(
       `SELECT * FROM orders WHERE restaurant_id = $1 ORDER BY placed_at DESC`,
       [restaurant_id]
     );
-
-    console.log(`🧾 Orders fetched: ${result.rows.length} for ${restaurant_id}`);
+    console.log(`🧾 Fetched ${result.rows.length} orders for`, restaurant_id);
     res.json(result.rows);
   } catch (err) {
-    console.error("❌ Error fetching orders:", err.message);
+    console.error("❌ Error fetching orders:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// 🟡 Update order status (complete)
+// 🟢 Update order status (complete)
 app.patch("/api/orders/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-
     const result = await pool.query(
       `UPDATE orders SET status = $1 WHERE id = $2 RETURNING *`,
       [status, id]
     );
-
-    if (!result.rows.length) {
-      return res.status(404).json({ error: "Order not found" });
-    }
-
-    console.log(`✅ Order #${id} marked as ${status}`);
+    console.log("✅ Order updated:", result.rows[0]);
     res.json(result.rows[0]);
   } catch (err) {
-    console.error("❌ Error updating order:", err.message);
+    console.error("❌ Error updating order:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// 🩺 Health check
+// 🧩 Health check
 app.get("/", (_, res) => res.send("✅ Nevolt backend running!"));
 
 // 🚀 Start server
