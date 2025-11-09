@@ -35,18 +35,8 @@ async function ensureTables() {
 // 🟢 Create new order
 app.post("/api/orders", async (req, res) => {
   try {
-    const {
-      restaurant_id,
-      customer_name,
-      table_no,
-      items,
-      notes,
-      total,
-      total_price: bodyTotal,
-    } = req.body;
-
-    // ✅ handle both total or total_price from frontend
-    const total_price = parseFloat(bodyTotal || total) || 0;
+    const { restaurant_id, customer_name, table_no, items, notes, total } = req.body;
+    const total_price = parseFloat(total) || 0;
 
     const result = await pool.query(
       `INSERT INTO orders (restaurant_id, customer_name, table_no, items, notes, total_price, status)
@@ -69,16 +59,14 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
-// 🟢 Get all orders (filtered by restaurant)
+// 🟢 Get orders (supports after_id)
 app.get("/api/orders", async (req, res) => {
   try {
     const { restaurant_id, after_id } = req.query;
-
     let query = `SELECT * FROM orders WHERE restaurant_id = $1`;
     const params = [restaurant_id];
 
-    // 🧠 Optional: fetch only orders created after a specific ID
-    if (after_id) {
+    if (after_id && !isNaN(after_id)) {
       query += ` AND id > $2`;
       params.push(after_id);
     }
@@ -86,7 +74,6 @@ app.get("/api/orders", async (req, res) => {
     query += ` ORDER BY placed_at DESC`;
 
     const result = await pool.query(query, params);
-
     console.log(`🧾 Orders fetched: ${result.rows.length} for ${restaurant_id}`);
     res.json(result.rows);
   } catch (err) {
