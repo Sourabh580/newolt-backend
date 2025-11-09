@@ -45,13 +45,7 @@ app.post("/api/orders", async (req, res) => {
       [restaurant_id, customer_name, table_no, JSON.stringify(items), notes || "", total_price]
     );
 
-    console.log("✅ New order created:", {
-      id: result.rows[0].id,
-      customer_name,
-      table_no,
-      total_price,
-    });
-
+    console.log("✅ New order created:", result.rows[0]);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error("❌ Error creating order:", err.message);
@@ -59,30 +53,14 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
-// 🟢 Get all orders (with optional completed filter)
+// 🟢 Get all orders (no filtering)
 app.get("/api/orders", async (req, res) => {
   try {
-    const { restaurant_id, after_id } = req.query;
-
-    let query = `SELECT * FROM orders WHERE restaurant_id = $1`;
-    const params = [restaurant_id];
-
-    // ✅ Only completed orders after reset ID (if provided)
-    if (after_id) {
-      query += ` AND (status != 'completed' OR id > $2) ORDER BY placed_at DESC`;
-      params.push(after_id);
-    } else {
-      query += ` ORDER BY placed_at DESC`;
-    }
-
-    const result = await pool.query(query, params);
-
-    console.log(
-      `🧾 Orders fetched: ${result.rows.length} for ${restaurant_id} ${
-        after_id ? `(after ID ${after_id})` : ""
-      }`
+    const { restaurant_id } = req.query;
+    const result = await pool.query(
+      `SELECT * FROM orders WHERE restaurant_id = $1 ORDER BY placed_at DESC`,
+      [restaurant_id]
     );
-
     res.json(result.rows);
   } catch (err) {
     console.error("❌ Error fetching orders:", err.message);
@@ -90,12 +68,11 @@ app.get("/api/orders", async (req, res) => {
   }
 });
 
-// 🟡 Update order status (complete)
+// 🟡 Update order status
 app.patch("/api/orders/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-
     const result = await pool.query(
       `UPDATE orders SET status = $1 WHERE id = $2 RETURNING *`,
       [status, id]
@@ -113,10 +90,9 @@ app.patch("/api/orders/:id", async (req, res) => {
   }
 });
 
-// 🩺 Health check
 app.get("/", (_, res) => res.send("✅ Nevolt backend running!"));
 
-// 🚀 Start server
+// 🚀 Start
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, async () => {
   await ensureTables();
