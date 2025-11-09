@@ -1,13 +1,14 @@
-   import express from "express";
+import express from "express";
 import cors from "cors";
 import pkg from "pg";
 
 const { Pool } = pkg;
 const app = express();
+
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// 🟢 External PostgreSQL connection
+// 🟢 PostgreSQL connection
 const pool = new Pool({
   connectionString:
     "postgresql://restaurant_backend_tahc_user:7ZNAWJG49Rq2pitu5FIAVp9BOQenNbdz@dpg-d449tu9r0fns7382dqp0-a/restaurant_backend_tahc",
@@ -24,7 +25,7 @@ async function ensureTables() {
       table_no TEXT,
       items JSONB,
       notes TEXT,
-      total_price NUMERIC,
+      total NUMERIC,
       status TEXT DEFAULT 'pending',
       placed_at TIMESTAMP DEFAULT NOW()
     );
@@ -33,30 +34,29 @@ async function ensureTables() {
 }
 
 // 🟢 Create new order
-app.post("/api/orders", async (req, res) => {
+app.post("/api/order", async (req, res) => {
   try {
     const { restaurant_id, customer_name, table_no, items, notes, total } = req.body;
 
-    // total may come as "total" from menu, convert to numeric
-    const total_price = parseFloat(total) || 0;
+    const totalValue = parseFloat(total) || 0;
 
     const result = await pool.query(
-      `INSERT INTO orders (restaurant_id, customer_name, table_no, items, notes, total_price, status)
+      `INSERT INTO orders (restaurant_id, customer_name, table_no, items, notes, total, status)
        VALUES ($1, $2, $3, $4, $5, $6, 'pending')
        RETURNING *`,
-      [restaurant_id, customer_name, table_no, JSON.stringify(items), notes || "", total_price]
+      [restaurant_id, customer_name, table_no, JSON.stringify(items), notes || "", totalValue]
     );
 
     console.log("✅ New order created:", {
       id: result.rows[0].id,
       customer_name,
       table_no,
-      total_price,
+      total: totalValue,
     });
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    console.error("❌ Error creating order:", err.message);
+    console.error("❌ Error creating order:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -74,7 +74,7 @@ app.get("/api/orders", async (req, res) => {
     console.log(`🧾 Orders fetched: ${result.rows.length} for ${restaurant_id}`);
     res.json(result.rows);
   } catch (err) {
-    console.error("❌ Error fetching orders:", err.message);
+    console.error("❌ Error fetching orders:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -97,7 +97,7 @@ app.patch("/api/orders/:id", async (req, res) => {
     console.log(`✅ Order #${id} marked as ${status}`);
     res.json(result.rows[0]);
   } catch (err) {
-    console.error("❌ Error updating order:", err.message);
+    console.error("❌ Error updating order:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
