@@ -1,4 +1,4 @@
-import express from "express";
+   import express from "express";
 import cors from "cors";
 import pkg from "pg";
 
@@ -7,7 +7,7 @@ const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// 🟢 PostgreSQL connection
+// 🟢 External PostgreSQL connection
 const pool = new Pool({
   connectionString:
     "postgresql://restaurant_backend_tahc_user:7ZNAWJG49Rq2pitu5FIAVp9BOQenNbdz@dpg-d449tu9r0fns7382dqp0-a/restaurant_backend_tahc",
@@ -36,6 +36,8 @@ async function ensureTables() {
 app.post("/api/orders", async (req, res) => {
   try {
     const { restaurant_id, customer_name, table_no, items, notes, total } = req.body;
+
+    // total may come as "total" from menu, convert to numeric
     const total_price = parseFloat(total) || 0;
 
     const result = await pool.query(
@@ -59,21 +61,16 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
-// 🟢 Get orders (supports after_id)
+// 🟢 Get all orders (filtered by restaurant)
 app.get("/api/orders", async (req, res) => {
   try {
-    const { restaurant_id, after_id } = req.query;
-    let query = `SELECT * FROM orders WHERE restaurant_id = $1`;
-    const params = [restaurant_id];
+    const { restaurant_id } = req.query;
 
-    if (after_id && !isNaN(after_id)) {
-      query += ` AND id > $2`;
-      params.push(after_id);
-    }
+    const result = await pool.query(
+      `SELECT * FROM orders WHERE restaurant_id = $1 ORDER BY placed_at DESC`,
+      [restaurant_id]
+    );
 
-    query += ` ORDER BY placed_at DESC`;
-
-    const result = await pool.query(query, params);
     console.log(`🧾 Orders fetched: ${result.rows.length} for ${restaurant_id}`);
     res.json(result.rows);
   } catch (err) {
