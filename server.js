@@ -35,8 +35,18 @@ async function ensureTables() {
 // 🟢 Create new order
 app.post("/api/orders", async (req, res) => {
   try {
-    const { restaurant_id, customer_name, table_no, items, notes, total } = req.body;
-    const total_price = parseFloat(total) || 0;
+    const {
+      restaurant_id,
+      customer_name,
+      table_no,
+      items,
+      notes,
+      total,
+      total_price: bodyTotal,
+    } = req.body;
+
+    // ✅ handle both total or total_price from frontend
+    const total_price = parseFloat(bodyTotal || total) || 0;
 
     const result = await pool.query(
       `INSERT INTO orders (restaurant_id, customer_name, table_no, items, notes, total_price, status)
@@ -45,7 +55,13 @@ app.post("/api/orders", async (req, res) => {
       [restaurant_id, customer_name, table_no, JSON.stringify(items), notes || "", total_price]
     );
 
-    console.log("✅ New order created:", result.rows[0]);
+    console.log("✅ New order created:", {
+      id: result.rows[0].id,
+      customer_name,
+      table_no,
+      total_price,
+    });
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error("❌ Error creating order:", err.message);
@@ -53,14 +69,25 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
-// 🟢 Get all orders (no filtering)
+// 🟢 Get all orders (filtered by restaurant)
 app.get("/api/orders", async (req, res) => {
   try {
-    const { restaurant_id } = req.query;
-    const result = await pool.query(
-      `SELECT * FROM orders WHERE restaurant_id = $1 ORDER BY placed_at DESC`,
-      [restaurant_id]
-    );
+    const { restaurant_id, after_id } = req.query;
+
+    let query = `SELECT * FROM orders WHERE restaurant_id = $1`;
+    const params = [restaurant_id];
+
+    // 🧠 Optional: fetch only orders created after a specific ID
+    if (after_id) {
+      query += ` AND id > $2`;
+      params.push(after_id);
+    }
+
+    query += ` ORDER BY placed_at DESC`;
+
+    const result = await pool.query(query, params);
+
+    console.log(`🧾 Orders fetched: ${result.rows.length} for ${restaurant_id}`);
     res.json(result.rows);
   } catch (err) {
     console.error("❌ Error fetching orders:", err.message);
@@ -68,11 +95,12 @@ app.get("/api/orders", async (req, res) => {
   }
 });
 
-// 🟡 Update order status
+// 🟡 Update order status (complete)
 app.patch("/api/orders/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
+
     const result = await pool.query(
       `UPDATE orders SET status = $1 WHERE id = $2 RETURNING *`,
       [status, id]
@@ -90,9 +118,10 @@ app.patch("/api/orders/:id", async (req, res) => {
   }
 });
 
+// 🩺 Health check
 app.get("/", (_, res) => res.send("✅ Nevolt backend running!"));
 
-// 🚀 Start
+// 🚀 Start server
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, async () => {
   await ensureTables();
