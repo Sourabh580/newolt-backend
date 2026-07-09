@@ -1,24 +1,65 @@
 import express from "express";
 import cors from "cors";
 import pkg from "pg";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const { Pool } = pkg;
 const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// 🟢 PostgreSQL connection
+// Load environment variables
+const {
+  DATABASE_URL,
+  PGHOST,
+  PGPORT,
+  PGUSER,
+  PGPASSWORD,
+  PGDATABASE,
+  SUPABASE_SNI_HOST
+} = process.env;
 
-const pool = new Pool({
-  host: "aws-0-ap-south-1.pooler.supabase.com",
-  port: 6543,
-  user: "postgres.xxpwstplqknvwjfaldig", // <--- ID yahan dot (.) ke saath jodna hi sahi rule hai
-  password: "Sourabhbhai1234",
-  database: "postgres",
-  ssl: { 
-    rejectUnauthorized: false
+// Build pool configuration. Support either DATABASE_URL (preferred) or individual PG_* vars.
+let poolConfig = {};
+
+if (DATABASE_URL) {
+  // If using a full connection string, ensure SSL and SNI (servername) are provided for Supabase pooler
+  let servername = SUPABASE_SNI_HOST;
+  if (!servername) {
+    try {
+      const url = new URL(DATABASE_URL);
+      servername = url.hostname;
+    } catch (e) {
+      // ignore
+    }
   }
-});
+
+  poolConfig.connectionString = DATABASE_URL;
+  poolConfig.ssl = {
+    rejectUnauthorized: false,
+    // SNI required by Supabase pooler in many cases
+    servername
+  };
+} else if (PGHOST && PGUSER && PGPASSWORD) {
+  poolConfig = {
+    host: PGHOST,
+    port: PGPORT ? Number(PGPORT) : 6543,
+    user: PGUSER,
+    password: PGPASSWORD,
+    database: PGDATABASE || "postgres",
+    ssl: {
+      rejectUnauthorized: false,
+      servername: SUPABASE_SNI_HOST || PGHOST
+    }
+  };
+} else {
+  console.error("Missing database configuration. Set DATABASE_URL or PGHOST/PGUSER/PGPASSWORD environment variables.");
+  process.exit(1);
+}
+
+const pool = new Pool(poolConfig);
 
 // 🧩 Ensure table exists (fallback for total / total_price)
 async function ensureTables() {
