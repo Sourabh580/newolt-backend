@@ -10,7 +10,11 @@ app.use(express.json());
 // 🟢 PostgreSQL connection
 
 const pool = new Pool({
-  connectionString: "postgres://postgres:Sourabhbhai1234@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?options=-c%20project%3Dxxpwstplqknvwjfaldig",
+  host: "aws-0-ap-south-1.pooler.supabase.com",
+  port: 6543,
+  user: "postgres.xxpwstplqknvwjfaldig", // <--- ID yahan dot (.) ke saath jodna hi sahi rule hai
+  password: "Sourabhbhai1234",
+  database: "postgres",
   ssl: { 
     rejectUnauthorized: false
   }
