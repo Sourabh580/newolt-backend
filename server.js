@@ -9,9 +9,15 @@ app.use(express.json());
 
 // 🟢 PostgreSQL connection
 const pool = new Pool({
-  connectionString:
-   "postgres://postgres:Sourabhbhai1234@aws-0-ap-south-1.pooler.supabase.com:6543/postgres",
-  ssl: { rejectUnauthorized: false },
+  host: "aws-0-ap-south-1.supabase.com",
+  port: 6543,
+  user: "postgres",
+  password: "Sourabhbhai1234",
+  database: "postgres",
+  ssl: { 
+    rejectUnauthorized: false,
+    servername: "aws-0-ap-south-1.supabase.com" // <--- Yeh SNI hostname explicitly dena zaroori hai!
+  },
 });
 
 // 🧩 Ensure table exists (fallback for total / total_price)
