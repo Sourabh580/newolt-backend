@@ -10,13 +10,16 @@ app.use(express.json());
 // 🟢 PostgreSQL connection
 
 const pool = new Pool({
-  connectionString: "postgres://postgres:Sourabhbhai1234@aws-0-ap-south-1.pooler.supabase.com:6543/postgres",
+  host: "aws-0-ap-south-1.pooler.supabase.com",
+  port: 6543,
+  user: "postgres.xxpwstplqknvwjfaldig", // <--- Username me '.' lagakar project ref ID dalna hi Supabase ka rules hai
+  password: "Sourabhbhai1234",
+  database: "postgres",
   ssl: { 
-    rejectUnauthorized: false,
-    servername: "xxpwstplqknvwjfaldig.supabase.co"
-  },
-  options: "-c project=xxpwstplqknvwjfaldig"
+    rejectUnauthorized: false
+  }
 });
+
 
 // 🧩 Ensure table exists (fallback for total / total_price)
 async function ensureTables() {
