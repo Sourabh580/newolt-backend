@@ -8,16 +8,14 @@ app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 // 🟢 PostgreSQL connection
+
 const pool = new Pool({
-  host: "aws-0-ap-south-1.supabase.com",
-  port: 6543,
-  user: "postgres",
-  password: "Sourabhbhai1234",
-  database: "postgres",
+  connectionString: "postgres://postgres:Sourabhbhai1234@aws-0-ap-south-1.pooler.supabase.com:5432/postgres",
   ssl: { 
     rejectUnauthorized: false,
-    servername: "aws-0-ap-south-1.supabase.com" // <--- Yeh SNI hostname explicitly dena zaroori hai!
+    servername: "xxpwstplqknvwjfaldig.supabase.co"
   },
+  options: "-c project=xxpwstplqknvwjfaldig"
 });
 
 // 🧩 Ensure table exists (fallback for total / total_price)
