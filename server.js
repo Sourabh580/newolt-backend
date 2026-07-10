@@ -9,27 +9,45 @@ const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// 🔐 Base64 Decoder: Jo aapki di hui safe string ko sahi private key mein badlega
+// 🔐 Pure Base64 Decoder: Isme koi purana variable load nahi hoga
 const getPrivateKey = () => {
   const base64Key = process.env.GOOGLE_PRIVATE_KEY_BASE64;
+  
   if (!base64Key) {
-    console.error("❌ Error: GOOGLE_PRIVATE_KEY_BASE64 is missing in Render variables!");
+    console.error("❌ CRITICAL ERROR: GOOGLE_PRIVATE_KEY_BASE64 is completely missing in Render!");
     return '';
   }
-  return Buffer.from(base64Key, 'base64').toString('utf8');
+
+  try {
+    // Agar string ke andar galti se spaces ya quotes bache hon toh unhe saaf karein
+    const cleanBase64 = base64Key.trim().replace(/^["']|["']$/g, '');
+    const decodedKey = Buffer.from(cleanBase64, 'base64').toString('utf8');
+    
+    // Debug log (Yeh check karne ke liye ki key sahi se decode hui ya nahi)
+    if (decodedKey.includes("-----BEGIN PRIVATE KEY-----")) {
+      console.log("🔒 Base64 Key successfully decoded and verified!");
+    } else {
+      console.error("❌ CRITICAL ERROR: Decoded string does not look like a valid Private Key!");
+    }
+    
+    return decodedKey;
+  } catch (err) {
+    console.error("❌ Error during Base64 decoding:", err.message);
+    return '';
+  }
 };
 
 // Google Sheets Authorization Setup
 const auth = new google.auth.JWT(
   process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
   null,
-  getPrivateKey(), // Yahan par aapki encode ki hui key decode ho kar automatic lag jayegi
+  getPrivateKey(),
   ["https://www.googleapis.com/auth/spreadsheets"]
 );
 
 const sheets = google.sheets({ version: "v4", auth });
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
-const RANGE = "Sheet1!A:I"; // A se I columns tak ka range
+const RANGE = "Sheet1!A:I";
 
 // Helper function: Google Sheet mein row add karne ke liye
 async function appendToSheet(rowData) {
@@ -62,14 +80,13 @@ async function updateOrderStatusInSheet(orderId, newStatus) {
     let rowIndex = -1;
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === orderId.toString()) {
-        rowIndex = i + 1; // Sheets 1-indexed hota hai
+        rowIndex = i + 1;
         break;
       }
     }
 
     if (rowIndex === -1) return false;
 
-    // Status column (Column H yani 8th column) ko update karenge
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
       range: `Sheet1!H${rowIndex}`,
@@ -88,11 +105,9 @@ async function updateOrderStatusInSheet(orderId, newStatus) {
 
 // ------------------- API ROUTES -------------------
 
-// 1. Naya Order Create karne ka API
 app.post("/api/orders", async (req, res) => {
   try {
     const { id, restaurant_id, customer_name, table_no, items, notes, total } = req.body;
-
     const placed_at = new Date().toISOString();
     const status = "pending";
     const orderId = id || Date.now().toString();
@@ -110,7 +125,6 @@ app.post("/api/orders", async (req, res) => {
     ];
 
     await appendToSheet(newRow);
-
     console.log(`✅ Order #${orderId} saved to Google Sheet!`);
     res.status(201).json({ id: orderId, status, message: "Order placed successfully!" });
   } catch (error) {
@@ -119,12 +133,10 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
-// 2. Order Status Update karne ka API (PATCH - complete/cancel ke liye)
 app.patch("/api/orders/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-
     const isUpdated = await updateOrderStatusInSheet(id, status);
 
     if (isUpdated) {
@@ -139,10 +151,8 @@ app.patch("/api/orders/:id", async (req, res) => {
   }
 });
 
-// 3. Health Check
 app.get("/", (_, res) => res.send("✅ Nevolt backend with Google Sheets is running live!"));
 
-// 🚀 Start Server
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
