@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import { google } from "googleapis";
 import dotenv from "dotenv";
+import path from "path"; // 👈 File path handle karne ke liye
 
 dotenv.config();
 
@@ -10,16 +11,10 @@ const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// ⚡ CRASH-PROOF KEY FORMATTING: \n characters ko sahi se convert karne ke liye
-const formattedKey = process.env.GOOGLE_PRIVATE_KEY 
-  ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n").replace(/^["']|["']$/g, '') 
-  : '';
-
-// 🛠️ FLEXIBLE AUTH SETUP: Strict parameter position hata kar direct object pass kiya hai
-const auth = new google.auth.JWT({
-  email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-  key: formattedKey,
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"]
+// 📁 Direct JSON file se auth setup (Bina kisi string convert/decoder jhanjhat ke)
+const auth = new google.auth.GoogleAuth({
+  keyFile: path.join(process.cwd(), "newolt-db-9b4bd56ccb02.json"), // Aapki downloaded file ka naam
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
 });
 
 const sheets = google.sheets({ version: "v4", auth });
@@ -134,3 +129,5 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
+  
