@@ -2,18 +2,21 @@ import express from "express";
 import cors from "cors";
 import { google } from "googleapis";
 import path from "path";
-import fs from "fs"; // fs import add kiya
+import fs from "fs";
 
 const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// ⚡ BULLET-PROOF AUTH: File ko manual read karke JWT se setup
+// ⚡ CLEAN AUTH: JSON parse mein error na aaye isliye clean read kar rahe hain
 function getSheetsInstance() {
   const KEYFILEPATH = path.join(process.cwd(), "service-account.json");
   
-  // File ko manually read aur parse kar rahe hain
-  const credentials = JSON.parse(fs.readFileSync(KEYFILEPATH, 'utf8'));
+  // File ko buffer read karke string banao, phir control characters strip karo
+  const rawData = fs.readFileSync(KEYFILEPATH, 'utf8')
+                    .replace(/[\u0000-\u001F]+/g, ""); 
+  
+  const credentials = JSON.parse(rawData);
 
   const auth = new google.auth.JWT(
     credentials.client_email,
@@ -39,7 +42,7 @@ app.post("/api/orders", async (req, res) => {
 
     const newRow = [orderId, restaurant_id, customer_name, table_no, typeof items === "object" ? JSON.stringify(items) : items, notes || "", total || 0, status, placed_at];
 
-    const sheets = getSheetsInstance(); // Manual client
+    const sheets = getSheetsInstance(); 
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
       range: RANGE,
