@@ -9,11 +9,35 @@ const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
+// 🛠️ Private Key Formatter: Jo Render par cryptographic decoding error ko fix karega
+const formatPrivateKey = (key) => {
+  if (!key) return '';
+  
+  // Agar key ke aage-piche galti se quotes aa gaye hon toh unhe saaf karein
+  let cleanKey = key.replace(/^["']|["']$/g, '');
+  
+  // Agar literal \n text hai toh use asli line break character se badlein
+  if (cleanKey.includes('\\n')) {
+    return cleanKey.replace(/\\n/g, '\n');
+  }
+  
+  // Agar Render ne saari lines jod kar ek lambi line bana di hai, toh use format karein
+  if (!cleanKey.includes('\n')) {
+    const header = "-----BEGIN PRIVATE KEY-----";
+    const footer = "-----END PRIVATE KEY-----";
+    let body = cleanKey.replace(header, '').replace(footer, '').replace(/\s/g, '');
+    const lines = body.match(/.{1,64}/g) || [];
+    return `${header}\n${lines.join('\n')}\n${footer}\n`;
+  }
+  
+  return cleanKey;
+};
+
 // Google Sheets Authorization Setup
 const auth = new google.auth.JWT(
   process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
   null,
-  process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+  formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY), // Formatter yahan apply kar diya hai
   ["https://www.googleapis.com/auth/spreadsheets"]
 );
 
@@ -101,7 +125,7 @@ app.post("/api/orders", async (req, res) => {
     ];
 
     await appendToSheet(newRow);
-    
+
     console.log(`✅ Order #${orderId} saved to Google Sheet!`);
     res.status(201).json({ id: orderId, status, message: "Order placed successfully!" });
   } catch (error) {
