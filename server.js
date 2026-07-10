@@ -1,4 +1,4 @@
-import express from "express";
+ import express from "express";
 import cors from "cors";
 import { google } from "googleapis";
 import dotenv from "dotenv";
@@ -9,35 +9,21 @@ const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// 🛠️ Private Key Formatter: Jo Render par cryptographic decoding error ko fix karega
-const formatPrivateKey = (key) => {
-  if (!key) return '';
-  
-  // Agar key ke aage-piche galti se quotes aa gaye hon toh unhe saaf karein
-  let cleanKey = key.replace(/^["']|["']$/g, '');
-  
-  // Agar literal \n text hai toh use asli line break character se badlein
-  if (cleanKey.includes('\\n')) {
-    return cleanKey.replace(/\\n/g, '\n');
+// 🔐 Base64 Decoder: Jo aapki di hui safe string ko sahi private key mein badlega
+const getPrivateKey = () => {
+  const base64Key = process.env.GOOGLE_PRIVATE_KEY_BASE64;
+  if (!base64Key) {
+    console.error("❌ Error: GOOGLE_PRIVATE_KEY_BASE64 is missing in Render variables!");
+    return '';
   }
-  
-  // Agar Render ne saari lines jod kar ek lambi line bana di hai, toh use format karein
-  if (!cleanKey.includes('\n')) {
-    const header = "-----BEGIN PRIVATE KEY-----";
-    const footer = "-----END PRIVATE KEY-----";
-    let body = cleanKey.replace(header, '').replace(footer, '').replace(/\s/g, '');
-    const lines = body.match(/.{1,64}/g) || [];
-    return `${header}\n${lines.join('\n')}\n${footer}\n`;
-  }
-  
-  return cleanKey;
+  return Buffer.from(base64Key, 'base64').toString('utf8');
 };
 
 // Google Sheets Authorization Setup
 const auth = new google.auth.JWT(
   process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
   null,
-  formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY), // Formatter yahan apply kar diya hai
+  getPrivateKey(), // Yahan par aapki encode ki hui key decode ho kar automatic lag jayegi
   ["https://www.googleapis.com/auth/spreadsheets"]
 );
 
@@ -109,9 +95,8 @@ app.post("/api/orders", async (req, res) => {
 
     const placed_at = new Date().toISOString();
     const status = "pending";
-    const orderId = id || Date.now().toString(); // Agar frontend se id na aaye toh timestamp use karega
+    const orderId = id || Date.now().toString();
 
-    // Array order: id, restaurant_id, customer_name, table_no, items, notes, total, status, placed_at
     const newRow = [
       orderId,
       restaurant_id,
