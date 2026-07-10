@@ -1,191 +1,140 @@
 import express from "express";
 import cors from "cors";
-import pkg from "pg";
+import { google } from "googleapis";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const { Pool } = pkg;
 const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// Load environment variables
-const {
-  DATABASE_URL,
-  PGHOST,
-  PGPORT,
-  PGUSER,
-  PGPASSWORD,
-  PGDATABASE,
-  SUPABASE_SNI_HOST
-} = process.env;
+// Google Sheets Authorization Setup
+const auth = new google.auth.JWT(
+  process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+  null,
+  process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+  ["https://www.googleapis.com/auth/spreadsheets"]
+);
 
-// Build pool configuration. Support either DATABASE_URL (preferred) or individual PG_* vars.
-let poolConfig = {};
+const sheets = google.sheets({ version: "v4", auth });
+const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
+const RANGE = "Sheet1!A:I"; // A se I columns tak ka range
 
-// Resolve non-secret connection details for debug logging
-let resolvedHost;
-let resolvedPort;
-let resolvedServername;
-
-if (DATABASE_URL) {
+// Helper function: Google Sheet mein row add karne ke liye
+async function appendToSheet(rowData) {
   try {
-    // Agar URL ke peeche extra params hain toh unhe saaf karne ke liye clean URL banate hain
-    const url = new URL(DATABASE_URL);
-    resolvedHost = url.hostname;
-    resolvedPort = url.port || "6543";
-    resolvedServername = SUPABASE_SNI_HOST || url.hostname;
-
-    poolConfig.connectionString = DATABASE_URL;
-    poolConfig.ssl = {
-      rejectUnauthorized: false,
-      servername: resolvedServername
-    };
-  } catch (e) {
-    console.error("Malformed DATABASE_URL:", e.message);
-  }
-} else if (PGHOST && PGUSER && PGPASSWORD) {
-  resolvedHost = PGHOST;
-  resolvedPort = PGPORT ? String(PGPORT) : "6543";
-  resolvedServername = SUPABASE_SNI_HOST || PGHOST;
-
-  poolConfig = {
-    host: PGHOST,
-    port: PGPORT ? Number(PGPORT) : 6543,
-    user: PGUSER,
-    password: PGPASSWORD,
-    database: PGDATABASE || "postgres",
-    ssl: {
-      rejectUnauthorized: false,
-      servername: resolvedServername
-    }
-  };
-} else {
-  console.error("Missing database configuration. Set DATABASE_URL or PGHOST/PGUSER/PGPASSWORD environment variables.");
-}
-
-// Non-secret debug log to help confirm what the app will send in SNI
-console.log("DB debug (non-secret):", {
-  usingDatabaseUrl: !!DATABASE_URL,
-  host: resolvedHost,
-  port: resolvedPort,
-  servername: resolvedServername
-});
-
-const pool = new Pool(poolConfig);
-
-// 🧩 Ensure table exists (fallback for total / total_price)
-async function ensureTables() {
-  try {
-    if (!pool) {
-      console.error("No pool configured; skipping ensureTables.");
-      return;
-    }
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS orders (
-        id SERIAL PRIMARY KEY,
-        restaurant_id TEXT,
-        customer_name TEXT,
-        table_no TEXT,
-        items JSONB,
-        notes TEXT,
-        total NUMERIC, -- fallback legacy column
-        total_price NUMERIC, -- new column for updated code
-        status TEXT DEFAULT 'pending',
-        placed_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-    console.log("✅ Orders table ready (with total and total_price columns)");
-  } catch (err) {
-    console.error("❌ Could not ensure tables (DB error):", err.message);
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: RANGE,
+      valueInputOption: "USER_ENTERED",
+      resource: {
+        values: [rowData]
+      }
+    });
+  } catch (error) {
+    console.error("Error writing to Google Sheet:", error.message);
+    throw error;
   }
 }
 
-// 🟢 Create new order
-app.post("/api/orders", async (req, res) => {
+// Helper function: Id ke anusar row dhoondhne aur status update karne ke liye
+async function updateOrderStatusInSheet(orderId, newStatus) {
   try {
-    const { restaurant_id, customer_name, table_no, items, notes, total } = req.body;
-    const totalValue = parseFloat(total) || 0;
-
-    let result;
-    try {
-      result = await pool.query(
-        `INSERT INTO orders (restaurant_id, customer_name, table_no, items, notes, total_price, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'pending')
-         RETURNING *`,
-        [restaurant_id, customer_name, table_no, JSON.stringify(items), notes || "", totalValue]
-      );
-    } catch (err) {
-      result = await pool.query(
-        `INSERT INTO orders (restaurant_id, customer_name, table_no, items, notes, total, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'pending')
-         RETURNING *`,
-        [restaurant_id, customer_name, table_no, JSON.stringify(items), notes || "", totalValue]
-      );
-    }
-
-    console.log("✅ New order created:", {
-      id: result.rows[0].id,
-      customer_name,
-      table_no,
-      total: totalValue,
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: RANGE
     });
 
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error("❌ Error creating order:", err.message);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
+    const rows = response.data.values;
+    if (!rows) return false;
 
-// 🟢 Get all orders
-app.get("/api/orders", async (req, res) => {
+    let rowIndex = -1;
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === orderId.toString()) {
+        rowIndex = i + 1; // Sheets 1-indexed hota hai
+        break;
+      }
+    }
+
+    if (rowIndex === -1) return false;
+
+    // Status column (Column H yani 8th column) ko update karenge
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Sheet1!H${rowIndex}`,
+      valueInputOption: "USER_ENTERED",
+      resource: {
+        values: [[newStatus]]
+      }
+    });
+
+    return true;
+  } catch (error) {
+    console.error("Error updating Google Sheet:", error.message);
+    throw error;
+  }
+}
+
+// ------------------- API ROUTES -------------------
+
+// 1. Naya Order Create karne ka API
+app.post("/api/orders", async (req, res) => {
   try {
-    const { restaurant_id } = req.query;
+    const { id, restaurant_id, customer_name, table_no, items, notes, total } = req.body;
 
-    const result = await pool.query(
-      `SELECT * FROM orders WHERE restaurant_id = $1 ORDER BY placed_at DESC`,
-      [restaurant_id]
-    );
+    const placed_at = new Date().toISOString();
+    const status = "pending";
+    const orderId = id || Date.now().toString(); // Agar frontend se id na aaye toh timestamp use karega
 
-    console.log(`🧾 Orders fetched: ${result.rows.length} for ${restaurant_id}`);
-    res.json(result.rows);
-  } catch (err) {
-    console.error("❌ Error fetching orders:", err.message);
-    res.status(500).json({ error: "Internal server error" });
+    // Array order: id, restaurant_id, customer_name, table_no, items, notes, total, status, placed_at
+    const newRow = [
+      orderId,
+      restaurant_id,
+      customer_name,
+      table_no,
+      typeof items === "object" ? JSON.stringify(items) : items,
+      notes || "",
+      total || 0,
+      status,
+      placed_at
+    ];
+
+    await appendToSheet(newRow);
+    
+    console.log(`✅ Order #${orderId} saved to Google Sheet!`);
+    res.status(201).json({ id: orderId, status, message: "Order placed successfully!" });
+  } catch (error) {
+    console.error("❌ Error creating order:", error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// 🟡 Update order status (complete)
+// 2. Order Status Update karne ka API (PATCH - complete/cancel ke liye)
 app.patch("/api/orders/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
 
-    const result = await pool.query(
-      `UPDATE orders SET status = $1 WHERE id = $2 RETURNING *`,
-      [status, id]
-    );
+    const isUpdated = await updateOrderStatusInSheet(id, status);
 
-    if (!result.rows.length) {
-      return res.status(404).json({ error: "Order not found" });
+    if (isUpdated) {
+      console.log(`✅ Order #${id} marked as ${status}`);
+      res.json({ id, status, message: `Order status updated to ${status}!` });
+    } else {
+      res.status(404).json({ error: "Order not found in Sheet" });
     }
-
-    console.log(`✅ Order #${id} marked as ${status}`);
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("❌ Error updating order:", err.message);
-    res.status(500).json({ error: "Internal server error" });
+  } catch (error) {
+    console.error("❌ Error updating order:", error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// 🩺 Health check
-app.get("/", (_, res) => res.send("✅ Nevolt backend running!"));
+// 3. Health Check
+app.get("/", (_, res) => res.send("✅ Nevolt backend with Google Sheets is running live!"));
 
-// 🚀 Start server
+// 🚀 Start Server
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  await ensureTables();
 });
