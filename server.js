@@ -1,4 +1,4 @@
-import express from "express";
+  import express from "express";
 import cors from "cors";
 import { google } from "googleapis";
 import dotenv from "dotenv";
@@ -9,23 +9,35 @@ const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// ⚡ DIRECT JSON OBJECT AUTH: Render local file ke nakhro se bachne ke liye direct memory auth
-let auth;
+// ⚡ ROBUST JWT AUTH: Parsing error se bachne ke liye direct assignment
+let sheets;
 try {
   if (process.env.GOOGLE_CREDS_JSON) {
-    const credentials = JSON.parse(process.env.GOOGLE_CREDS_JSON);
-    auth = new google.auth.GoogleAuth({
-      credentials,
-      scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-    });
-  } else {
-    console.error("❌ GOOGLE_CREDS_JSON variable is completely missing in Render environment!");
+    // Agar parse error aa raha hai, toh hum JSON.parse() hatakar 
+    // direct string ya pre-parsed object expect karenge.
+    // Yahan hum try karenge ki agar parse fail ho, toh fallback use karein.
+    let credentials;
+    try {
+      credentials = JSON.parse(process.env.GOOGLE_CREDS_JSON);
+    } catch (e) {
+      console.log("⚠️ JSON parse failed, trying direct env fallback...");
+      credentials = JSON.parse(process.env.GOOGLE_CREDS_JSON.replace(/\\n/g, '\n'));
+    }
+
+    const auth = new google.auth.JWT(
+      credentials.client_email,
+      null,
+      credentials.private_key,
+      ["https://www.googleapis.com/auth/spreadsheets"]
+    );
+
+    sheets = google.sheets({ version: "v4", auth });
+    console.log("✅ Google Sheets Auth Initialized!");
   }
 } catch (err) {
-  console.error("❌ Error parsing GOOGLE_CREDS_JSON string:", err.message);
+  console.error("❌ Auth Error:", err.message);
 }
 
-const sheets = google.sheets({ version: "v4", auth });
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
 const RANGE = "Sheet1!A:I";
 
@@ -36,9 +48,7 @@ async function appendToSheet(rowData) {
       spreadsheetId: SPREADSHEET_ID,
       range: RANGE,
       valueInputOption: "USER_ENTERED",
-      resource: {
-        values: [rowData]
-      }
+      resource: { values: [rowData] }
     });
   } catch (error) {
     console.error("Error writing to Google Sheet:", error.message);
@@ -46,7 +56,7 @@ async function appendToSheet(rowData) {
   }
 }
 
-// Helper function: Id ke anusar row dhoondhne aur status update karne ke liye
+// Helper function: Status update
 async function updateOrderStatusInSheet(orderId, newStatus) {
   try {
     const response = await sheets.spreadsheets.values.get({
@@ -71,19 +81,14 @@ async function updateOrderStatusInSheet(orderId, newStatus) {
       spreadsheetId: SPREADSHEET_ID,
       range: `Sheet1!H${rowIndex}`,
       valueInputOption: "USER_ENTERED",
-      resource: {
-        values: [[newStatus]]
-      }
+      resource: { values: [[newStatus]] }
     });
-
     return true;
   } catch (error) {
     console.error("Error updating Google Sheet:", error.message);
     throw error;
   }
 }
-
-// ------------------- API ROUTES -------------------
 
 app.post("/api/orders", async (req, res) => {
   try {
@@ -92,23 +97,11 @@ app.post("/api/orders", async (req, res) => {
     const status = "pending";
     const orderId = id || Date.now().toString();
 
-    const newRow = [
-      orderId,
-      restaurant_id,
-      customer_name,
-      table_no,
-      typeof items === "object" ? JSON.stringify(items) : items,
-      notes || "",
-      total || 0,
-      status,
-      placed_at
-    ];
+    const newRow = [orderId, restaurant_id, customer_name, table_no, typeof items === "object" ? JSON.stringify(items) : items, notes || "", total || 0, status, placed_at];
 
     await appendToSheet(newRow);
-    console.log(`✅ Order #${orderId} saved to Google Sheet!`);
-    res.status(201).json({ id: orderId, status, message: "Order placed successfully!" });
+    res.status(201).json({ id: orderId, status, message: "Order placed!" });
   } catch (error) {
-    console.error("❌ Error creating order:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -118,22 +111,14 @@ app.patch("/api/orders/:id", async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
     const isUpdated = await updateOrderStatusInSheet(id, status);
-
-    if (isUpdated) {
-      console.log(`✅ Order #${id} marked as ${status}`);
-      res.json({ id, status, message: `Order status updated to ${status}!` });
-    } else {
-      res.status(404).json({ error: "Order not found in Sheet" });
-    }
+    if (isUpdated) res.json({ id, status, message: "Updated!" });
+    else res.status(404).json({ error: "Order not found" });
   } catch (error) {
-    console.error("❌ Error updating order:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get("/", (_, res) => res.send("✅ Nevolt backend with Google Sheets is running live!"));
+app.get("/", (_, res) => res.send("✅ Nevolt API is live!"));
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
