@@ -1,4 +1,5 @@
- import express from "express";
+ 
+import express from "express";
 import cors from "cors";
 import { google } from "googleapis";
 import dotenv from "dotenv";
@@ -9,39 +10,15 @@ const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// 🔐 Pure Base64 Decoder: Isme koi purana variable load nahi hoga
-const getPrivateKey = () => {
-  const base64Key = process.env.GOOGLE_PRIVATE_KEY_BASE64;
-  
-  if (!base64Key) {
-    console.error("❌ CRITICAL ERROR: GOOGLE_PRIVATE_KEY_BASE64 is completely missing in Render!");
-    return '';
-  }
+// Google Sheets Authorization Setup (Clean formatting for complete key)
+const formattedKey = process.env.GOOGLE_PRIVATE_KEY 
+  ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n").replace(/^["']|["']$/g, '') 
+  : '';
 
-  try {
-    // Agar string ke andar galti se spaces ya quotes bache hon toh unhe saaf karein
-    const cleanBase64 = base64Key.trim().replace(/^["']|["']$/g, '');
-    const decodedKey = Buffer.from(cleanBase64, 'base64').toString('utf8');
-    
-    // Debug log (Yeh check karne ke liye ki key sahi se decode hui ya nahi)
-    if (decodedKey.includes("-----BEGIN PRIVATE KEY-----")) {
-      console.log("🔒 Base64 Key successfully decoded and verified!");
-    } else {
-      console.error("❌ CRITICAL ERROR: Decoded string does not look like a valid Private Key!");
-    }
-    
-    return decodedKey;
-  } catch (err) {
-    console.error("❌ Error during Base64 decoding:", err.message);
-    return '';
-  }
-};
-
-// Google Sheets Authorization Setup
 const auth = new google.auth.JWT(
   process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
   null,
-  getPrivateKey(),
+  formattedKey,
   ["https://www.googleapis.com/auth/spreadsheets"]
 );
 
